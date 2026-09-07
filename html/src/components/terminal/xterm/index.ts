@@ -28,6 +28,7 @@ enum Command {
     OUTPUT = '0',
     SET_WINDOW_TITLE = '1',
     SET_PREFERENCES = '2',
+    SESSION_STATUS = '3',
 
     // client side
     INPUT = '0',
@@ -61,6 +62,7 @@ export interface FlowControl {
 
 export interface XtermOptions {
     wsUrl: string;
+    sessionId: string;
     tokenUrl: string;
     flowControl: FlowControl;
     clientOptions: ClientOptions;
@@ -94,7 +96,9 @@ export class Xterm {
 
     private socket?: WebSocket;
     private token: string;
+    private disposed = false;
     private opened = false;
+    private reconnecting = false;
     private title?: string;
     private titleFixed?: string;
     private resizeOverlay = true;
@@ -114,6 +118,14 @@ export class Xterm {
             d.dispose();
         }
         this.disposables.length = 0;
+    }
+
+    destroy() {
+        this.disposed = true;
+        this.doReconnect = false;
+        this.socket?.close();
+        this.dispose();
+        this.terminal?.dispose();
     }
 
     @bind
@@ -253,25 +265,24 @@ export class Xterm {
         register(addEventListener(socket, 'open', this.onSocketOpen));
         register(addEventListener(socket, 'message', this.onSocketData as EventListener));
         register(addEventListener(socket, 'close', this.onSocketClose as EventListener));
-        register(addEventListener(socket, 'error', () => (this.doReconnect = false)));
+        register(addEventListener(socket, 'error', () => console.warn('[ttyd] websocket error')));
     }
 
     @bind
     private onSocketOpen() {
         console.log('[ttyd] websocket connection opened');
 
-        const { textEncoder, terminal, overlayAddon } = this;
-        const msg = JSON.stringify({ AuthToken: this.token, columns: terminal.cols, rows: terminal.rows });
+        const { textEncoder, terminal } = this;
+        const msg = JSON.stringify({
+            AuthToken: this.token,
+            SessionId: this.options.sessionId,
+            columns: terminal.cols,
+            rows: terminal.rows,
+        });
         this.socket?.send(textEncoder.encode(msg));
 
-        if (this.opened) {
-            terminal.reset();
-            terminal.options.disableStdin = false;
-            overlayAddon.showOverlay('Reconnected', 300);
-        } else {
-            this.opened = true;
-        }
-
+        this.reconnecting = this.opened;
+        this.opened = true;
         this.doReconnect = this.reconnect;
         this.initListeners();
         terminal.focus();
@@ -279,6 +290,7 @@ export class Xterm {
 
     @bind
     private onSocketClose(event: CloseEvent) {
+        if (this.disposed) return;
         console.log(`[ttyd] websocket connection closed with code: ${event.code}`);
 
         const { refreshToken, connect, doReconnect, overlayAddon } = this;
@@ -354,6 +366,18 @@ export class Xterm {
                 this.title = textDecoder.decode(data);
                 document.title = this.title;
                 break;
+            case Command.SESSION_STATUS: {
+                const status = textDecoder.decode(data);
+                if (status === 'resumed') {
+                    if (this.reconnecting) this.overlayAddon.showOverlay('Reconnected', 300);
+                } else if (status === 'new' && this.reconnecting) {
+                    this.terminal.reset();
+                    this.terminal.options.disableStdin = false;
+                    this.overlayAddon.showOverlay('New session', 300);
+                }
+                this.reconnecting = false;
+                break;
+            }
             case Command.SET_PREFERENCES:
                 this.applyPreferences({
                     ...this.options.clientOptions,

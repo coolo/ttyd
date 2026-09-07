@@ -71,6 +71,9 @@ ttyd 1 "September 2016" ttyd "User Manual"
   -q, --exit-no-conn
       Exit on all clients disconnection
 
+  -R, --reconnect-timeout <seconds>
+      Retain disconnected sessions for this many seconds (default: 0, disabled). Cannot be combined with --once or --exit-no-conn.
+
   -B, --browser
       Open terminal with the default system browser
 

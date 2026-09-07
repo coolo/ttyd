@@ -53,6 +53,7 @@ pty_buf_t *pty_buf_init(char *base, size_t len) {
   buf->base = xmalloc(len);
   memcpy(buf->base, base, len);
   buf->len = len;
+  buf->next = NULL;
   return buf;
 }
 

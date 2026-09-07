@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <getopt.h>
+#include <limits.h>
 #include <json.h>
 #include <libwebsockets.h>
 #include <signal.h>
@@ -25,6 +26,7 @@ struct endpoints endpoints = {"/ws", "/", "/token", ""};
 
 extern int callback_http(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len);
 extern int callback_tty(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len);
+extern void tty_sessions_shutdown(void);
 
 // websocket protocols
 static const struct lws_protocols protocols[] = {{"http-only", callback_http, sizeof(struct pss_http), 0},
@@ -80,12 +82,13 @@ static const struct option options[] = {{"port", required_argument, NULL, 'p'},
                                         {"max-clients", required_argument, NULL, 'm'},
                                         {"once", no_argument, NULL, 'o'},
                                         {"exit-no-conn", no_argument, NULL, 'q'},
+                                        {"reconnect-timeout", required_argument, NULL, 'R'},
                                         {"browser", no_argument, NULL, 'B'},
                                         {"debug", required_argument, NULL, 'd'},
                                         {"version", no_argument, NULL, 'v'},
                                         {"help", no_argument, NULL, 'h'},
                                         {NULL, 0, 0, 0}};
-static const char *opt_string = "p:i:U:c:H:u:g:s:w:I:b:P:f:6aSC:K:A:Wt:T:Om:oqBd:vh";
+static const char *opt_string = "p:i:U:c:H:u:g:s:w:I:b:P:f:6aSC:K:A:Wt:T:Om:oqR:Bd:vh";
 
 static void print_help() {
   // clang-format off
@@ -112,6 +115,7 @@ static void print_help() {
           "    -m, --max-clients       Maximum clients to support (default: 0, no limit)\n"
           "    -o, --once              Accept only one client and exit on disconnection\n"
           "    -q, --exit-no-conn      Exit on all clients disconnection\n"
+          "    -R, --reconnect-timeout Retain disconnected sessions for this many seconds (default: 0, disabled)\n"
           "    -B, --browser           Open terminal with the default system browser\n"
           "    -I, --index             Custom index.html path\n"
           "    -b, --base-path         Expected base path for requests coming from a reverse proxy (eg: /mounted/here, max length: 128)\n"
@@ -156,6 +160,8 @@ static void print_config() {
   if (server->max_clients > 0) lwsl_notice("  max clients: %d\n", server->max_clients);
   if (server->once) lwsl_notice("  once: true\n");
   if (server->exit_no_conn) lwsl_notice("  exit_no_conn: true\n");
+  if (server->reconnect_timeout > 0)
+    lwsl_notice("  reconnect timeout: %d seconds\n", server->reconnect_timeout);
   if (server->index != NULL) lwsl_notice("  custom index.html: %s\n", server->index);
   if (server->cwd != NULL) lwsl_notice("  working directory: %s\n", server->cwd);
   if (!server->writable) lwsl_warn("The --writable option is not set, will start in readonly mode\n");
@@ -246,6 +252,8 @@ static void signal_cb(uv_signal_t *watcher, int signum) {
 
   if (force_exit) exit(EXIT_FAILURE);
   force_exit = true;
+  server->shutting_down = true;
+  tty_sessions_shutdown();
 
   lws_cancel_service(context);
   uv_stop(server->loop);
@@ -257,7 +265,7 @@ static int parse_int(char *name, char *str) {
   char *endptr;
   errno = 0;
   long val = strtol(str, &endptr, 0);
-  if (errno != 0 || endptr == str) {
+  if (errno != 0 || endptr == str || *endptr != '\0' || val < INT_MIN || val > INT_MAX) {
     fprintf(stderr, "ttyd: invalid value for %s: %s\n", name, str);
     exit(EXIT_FAILURE);
   }
@@ -375,6 +383,13 @@ int main(int argc, char **argv) {
         break;
       case 'q':
         server->exit_no_conn = true;
+        break;
+      case 'R':
+        server->reconnect_timeout = parse_int("reconnect-timeout", optarg);
+        if (server->reconnect_timeout < 0) {
+          fprintf(stderr, "ttyd: reconnect timeout must not be negative: %s\n", optarg);
+          return -1;
+        }
         break;
       case 'B':
         browser = true;
@@ -529,6 +544,10 @@ int main(int argc, char **argv) {
 
   if (server->command == NULL || strlen(server->command) == 0) {
     fprintf(stderr, "ttyd: missing start command\n");
+    return -1;
+  }
+  if (server->reconnect_timeout > 0 && (server->once || server->exit_no_conn)) {
+    fprintf(stderr, "ttyd: --reconnect-timeout cannot be combined with --once or --exit-no-conn\n");
     return -1;
   }
 

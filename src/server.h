@@ -15,6 +15,7 @@
 #define OUTPUT '0'
 #define SET_WINDOW_TITLE '1'
 #define SET_PREFERENCES '2'
+#define SESSION_STATUS '3'
 
 // url paths
 struct endpoints {
@@ -28,6 +29,20 @@ extern volatile bool force_exit;
 extern struct lws_context *context;
 extern struct server *server;
 extern struct endpoints endpoints;
+
+struct pss_tty;
+struct tty_session {
+  char id[64];
+  char user[30];
+  struct pss_tty *pss;
+  pty_process *process;
+  pty_buf_t *pty_buf;
+  pty_buf_t *pty_buf_tail;
+  uv_timer_t *timer;
+  bool listed;
+  bool expired;
+  struct tty_session *next;
+};
 
 struct pss_http {
   char path[128];
@@ -50,16 +65,12 @@ struct pss_tty {
   char *buffer;
   size_t len;
 
-  pty_process *process;
-  pty_buf_t *pty_buf;
+  struct tty_session *session;
+  bool session_resumed;
 
   int lws_close_status;
 };
 
-typedef struct {
-  struct pss_tty *pss;
-  bool ws_closed;
-} pty_ctx_t;
 
 struct server {
   int client_count;        // client count
@@ -78,7 +89,10 @@ struct server {
   bool check_origin;       // whether allow websocket connection from different origin
   int max_clients;         // maximum clients to support
   bool once;               // whether accept only one client and exit on disconnection
-  bool exit_no_conn;       // whether exit on all clients disconnection
+  bool exit_no_conn;        // whether exit on all clients disconnection
+  int reconnect_timeout;    // seconds to retain disconnected sessions
+  bool shutting_down;      // whether the server is shutting down
+  struct tty_session *sessions;
   char socket_path[255];   // UNIX domain socket path
   char terminal_type[30];  // terminal type to report
 

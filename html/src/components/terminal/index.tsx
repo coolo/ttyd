@@ -29,7 +29,7 @@ export class Terminal extends Component<Props, State> {
     }
 
     componentWillUnmount() {
-        this.xterm.dispose();
+        this.xterm.destroy();
     }
 
     render({ id }: Props, { modal }: State) {

@@ -8,6 +8,26 @@ import type { ClientOptions, FlowControl } from './terminal/xterm';
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const path = window.location.pathname.replace(/[/]+$/, '');
 const wsUrl = [protocol, '//', window.location.host, path, '/ws', window.location.search].join('');
+
+function getSessionId(): string {
+    const key = `ttyd-session:${window.location.origin}${window.location.pathname}${window.location.search}`;
+    try {
+        const existing = window.sessionStorage.getItem(key);
+        if (existing) return existing;
+        const bytes = new Uint8Array(16);
+        window.crypto.getRandomValues(bytes);
+        const id = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+        window.sessionStorage.setItem(key, id);
+        return id;
+    } catch {
+        // The Xterm instance still keeps this ID for transport reconnects when storage is unavailable.
+        const bytes = new Uint8Array(16);
+        window.crypto.getRandomValues(bytes);
+        return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+    }
+}
+
+const sessionId = getSessionId();
 const tokenUrl = [window.location.protocol, '//', window.location.host, path, '/token'].join('');
 const clientOptions = {
     rendererType: 'webgl',
@@ -58,6 +78,7 @@ export class App extends Component {
             <Terminal
                 id="terminal-container"
                 wsUrl={wsUrl}
+                sessionId={sessionId}
                 tokenUrl={tokenUrl}
                 clientOptions={clientOptions}
                 termOptions={termOptions}

@@ -16,9 +16,10 @@
 bool conpty_init();
 #endif
 
-typedef struct {
+typedef struct pty_buf_ {
   char *base;
   size_t len;
+  struct pty_buf_ *next;
 } pty_buf_t;
 
 struct pty_process_;

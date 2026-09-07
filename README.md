@@ -71,6 +71,7 @@ OPTIONS:
     -m, --max-clients       Maximum clients to support (default: 0, no limit)
     -o, --once              Accept only one client and exit on disconnection
     -q, --exit-no-conn      Exit on all clients disconnection
+    -R, --reconnect-timeout Retain disconnected sessions for this many seconds (default: 0, disabled)
     -B, --browser           Open terminal with the default system browser
     -I, --index             Custom index.html path
     -b, --base-path         Expected base path for requests coming from a reverse proxy (eg: /mounted/here, max length: 128)
@@ -84,6 +85,8 @@ OPTIONS:
     -v, --version           Print the version and exit
     -h, --help              Print this text and exit
 ```
+
+With `--reconnect-timeout`, ttyd keeps the command and its PTY alive after a WebSocket disconnect and allows the same browser tab to reconnect to it. The timeout is in seconds and defaults to `0` (disabled); authentication is still checked on every reconnect. It cannot be combined with `--once` or `--exit-no-conn`. For example: `ttyd --reconnect-timeout 60 -W bash`.
 
 Read the example usage on the [wiki](https://github.com/tsl0922/ttyd/wiki/Example-Usage).
 
